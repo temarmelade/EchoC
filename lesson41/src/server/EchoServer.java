@@ -1,11 +1,11 @@
 package server;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 public class EchoServer {
     private final int port;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    private final ListClients listClients = new ListClients();
     public EchoServer(int port) {
         this.port = port;
     }
@@ -24,28 +25,37 @@ public class EchoServer {
         try(ServerSocket server = new ServerSocket(port)) {
             while(!server.isClosed()) {
                 Socket clientSocket = server.accept();
-                pool.submit(() -> handle(clientSocket));
+                pool.submit(() -> {
+                    listClients.addClient(new Client(clientSocket));
+                    System.out.println(clientSocket.getPort());
+                    handle(clientSocket);
+                });
             }
         }
         catch (IOException e) {
             System.out.printf("К сожалению порт %s уже занят.%n", port);
         }
     }
-    private void handle(Socket socket) {
+    public void handle(Socket socket) {
         System.out.printf("Hello, %s%n%n%n", socket);
+        Client client = new Client(socket);
         try(socket; Scanner reader = getReader(socket); PrintWriter writer = getWriter(socket)) {
-            sendResponse("Привет " + socket, writer);
             while (true) {
                 String line = reader.nextLine().strip();
                 if (isQuit(line) || isEmpty(line)) {
                     break;
+                };
+                for (Client c : listClients.getClients()) {
+                    if (!c.getSocket().equals(socket)) {
+                        sendResponse(client.getUsername() + ": " + line, new PrintWriter(c.getSocket().getOutputStream()));
+                    }
                 }
-                sendResponse(line, writer);
             }
         } catch (NoSuchElementException e) {
             System.out.println("Client dropped connection");
+            listClients.removeClient(new Client(socket));
         } catch (IOException e) {
-            e.printStackTrace();
+            System.out.printf("Sorry, there is a mistake %n%n%s", e.getMessage());
         }
         System.out.printf("Client [%s] disconnected.%n", socket);
     }
@@ -66,7 +76,4 @@ public class EchoServer {
     private boolean isEmpty(String msg) {
         return msg == null || msg.isBlank();
     }
-//    private String reverseMessage(String message) {
-//        return new StringBuilder(message).reverse().toString();
-//    }
 }
